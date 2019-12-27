@@ -2,6 +2,8 @@ const fs = require("fs")
 const path = require('path')
 const _ = require('lodash')
 const assert = require('assert')
+const { red, blue, green } = require('./color')
+const { alloc } = require('./mem')
 
 
 PATH = {
@@ -105,17 +107,115 @@ function split(str, spliter=/\s/) {
     return result
 }
 
-function search(str, reg) {
+// 不是'\n'的位置但是可能是开头
+function findUntilPreLinePos(somePosOfCur, content){
+    var /**character */ char = content[somePosOfCur]
+    var i = somePosOfCur
+
+    while(i > 0){
+        i--;
+        char = content[i]
+        if( char === '\n'){
+            i++;
+            break;
+        }
+    }
+    return i;
+}
+
+// 可能是结尾
+function findUntilLastLinePos(somePosOfCur, content, includeNL=true){
+    const length = content.length - 1
+    var char = content[somePosOfCur]
+    var i = somePosOfCur
+
+    while(i < length-1){
+        i++;
+        char = content[i]
+        if( char === '\n'){
+            if(!includeNL){
+                i--;
+            }
+            break;
+        }
+    }
+    return i;
+}
+
+function findUntilPreLine(somePosOfCur, content) {
+    var /**character */ char = content[somePosOfCur]
+    var i = somePosOfCur
+    const out = []
+
+    while(i > 0){
+        i--;
+        char = content[i]
+        if( char === '\n'){
+            i++;
+            break;
+        }
+        out.push(char)
+    }
+
+    const r = alloc(out.length)
+    for( var i in out){
+        const pos = out.length - 1 - i
+        r.write(out[pos], pos)
+    }
+    
+    return r.toString()
+}
+
+function findUntilLastLine(somePosOfCur, content, includeNL=true) {
+    const length = content.length
+    var char = content[somePosOfCur]
+    var i = somePosOfCur
+    const out = []
+    while(i < length-1){
+        i++;
+        char = content[i]
+        if( char === '\n'){
+            if(!includeNL){
+                i--;
+            } else {
+                out.push(char)
+            }
+            break;
+        }
+        out.push(char)
+    }
+
+    const r = alloc(out.length)
+    for( var i in out){
+        r.write(out[i], i)
+    }
+    
+    return r.toString() 
+
+}
+
+function search(str, reg, options) {
     // 如何检测是否是/.*/g类型呢?
+    var count = 0;
 	while( mattached = reg.exec(str)) {
-		console.log(mattached[0], mattached[1], mattached.index)
+        const start = findUntilPreLinePos(mattached.index, str)
+        const end = findUntilLastLinePos(mattached.index, str, false)
+        const text = str.slice(start, mattached.index) + green(mattached[0]) + 
+                    str.slice(mattached.index + mattached[0].length, end)
+        
+        if(count++ === 0)
+            console.log( blue(options.filename))
+		console.log( text , mattached[1], mattached.index)
     }
     
 }
 
-function replace( str, reg, callback) {
+function replace( str, reg, options) {
+    var count = 0;
     str = str.replace(reg, (...args) => {
-        return callback(str, ...args)
+        if(count++ === 0)
+            console.log( blue(options.filename) )
+        return options.callback(str, ...args)
     })
     return str
 }
@@ -142,6 +242,10 @@ class FileOps {
     }
 
     freplace (lpath, regOptions, callback, options = {}) {
+        lpath = pathParser(lpath)
+        if(options.include) options.include = pathParser(options.include)
+        if(options.exclude) options.exclude = pathParser(options.exclude)
+
         var reg = this.fparseReg(regOptions)
         console.log(reg)
 
@@ -150,12 +254,16 @@ class FileOps {
         allfile.forEach( el => {
             const f = fs.readFileSync(el)
             var str = f.toString()
-            str = replace(str, reg, callback)
+            str = replace(str, reg, {callback, filename: el})
             fs.writeFileSync(el, str)
         })
     }
 
     fsearch (lpath, regOptions, options) {
+        lpath = pathParser(lpath)
+        if(options.include) options.include = pathParser(options.include)
+        if(options.exclude) options.exclude = pathParser(options.exclude)
+
         var reg = this.fparseReg(regOptions)
         console.log(reg)
 
@@ -164,11 +272,15 @@ class FileOps {
         allfile.forEach( el => {
             const f = fs.readFileSync(el)
             var str = f.toString()
-            search(str, reg)
+            search(str, reg, {filename: el})
         }) 
     }
 
     findFile (lpath='.', options={}) {
+        lpath = pathParser(lpath)
+        if(options.include) options.include = pathParser(options.include)
+        if(options.exclude) options.exclude = pathParser(options.exclude)
+
         if(options.print === undefined)
             options.print = true
         const finded = []
@@ -231,9 +343,21 @@ function zip(collec, callback) {
 
 const collecOps = {
     addPrefix: (array, prefix, parser) => {
-        return array.map( x => parser(prefix, x))
+        if(parser){
+            return array.map( x => parser(prefix, x))
+        }  
+        return array.map( x => prefix + x)
+    },
+    addSuffix: (array, suffix, parser) => {
+        if(parser){
+            return array.map( x => parser(suffix, x))
+        }
+        return array.map( x => x+suffix)
     }
 }
+
+const addPrefix = collecOps.addPrefix
+const addSuffix = collecOps.addSuffix
 
 function arrayFilter(original, options){
     const include = options.include || [/.*/]  // 空字符也匹配（即匹配到0次)
@@ -278,18 +402,23 @@ function test(){
 }
 
 
+
+const pathParser = mPathParser.pathParser
 module.exports = {
     PATH,
 
     CrossPath,
     FileOps,
 
-	strip,
-    split,
     collecOps,
     fileOps,
+
+	strip,
+    split,
+    addPrefix,
+    addSuffix,
     test,
-    pathParser: mPathParser.pathParser
+    pathParser,
 }
 
 // fileOps.fsearch("/home/ka/Documents/tmp1/new-employer/employer-portal-ui",  {reg: `ViewChild\\([",'](.*)[",']\\)`, flag: "g"}, { exclude: [
