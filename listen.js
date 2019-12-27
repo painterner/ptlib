@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 express = require('express')
 bodyparser = require('body-parser')
 
